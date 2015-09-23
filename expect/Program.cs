@@ -8,8 +8,19 @@ namespace expect
 {
     internal static class Program
     {
-        private const string Test = @"http://api.comaround.com:10401/legacy";
+        private const string Test = @"http://api.comaround.com:10400/legacy";
         private const string Live = @"http://api.comaround.com/legacy";
+        const string Xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+                                <Envelope xmlns=""http://schemas.xmlsoap.org/soap/envelope/"">
+                                    <Body>
+                                        <Search xmlns=""http://zero.comaround.com"">
+                                            <loginName>maria</loginName>
+                                            <passWord></passWord>
+                                            <groupID>-1</groupID>
+                                            <searchString>word</searchString>
+                                        </Search>
+                                    </Body>
+                                </Envelope>";
 
         private static void Main(string[] args)
         {
@@ -29,49 +40,53 @@ namespace expect
                         break;
                 }
             }
-            Console.WriteLine("Calling search on URL {0}", url);
-            var request = CreateWebRequest(url);
-            var soapEnvelopeXml = new XmlDocument();
-            soapEnvelopeXml.LoadXml(@"<?xml version=""1.0"" encoding=""utf-8""?>
-                <Envelope xmlns=""http://www.w3.org/2003/05/soap-envelope"">
-                    <Body>
-                        <Search xmlns=""http://zero.comaround.com"">
-                            <loginName>maria</loginName>
-                            <passWord>ap3lsin</passWord>
-                            <groupID>0</groupID>
-                            <searchString>word</searchString>
-                        </Search>
-                    </Body>
-                </Envelope >");
-            using (var stream = request.GetRequestStream())
+            Console.WriteLine("Calling search on URL \"{0}\"{1}", url, args.Length > 1 ? " without expect header" : " with expect header");
+            for (var i = 0; i < 10; i++)
             {
-                soapEnvelopeXml.Save(stream);
-            }
-
-            var sw = Stopwatch.StartNew();
-            try
-            {
-                using (var response = request.GetResponse())
+                var request = CreateWebRequest(url);
+                if (args.Length > 1)
+                    request.ServicePoint.Expect100Continue = false;
+                var soapEnvelopeXml = new XmlDocument();
+                soapEnvelopeXml.LoadXml(Xml);
+                using (var stream = request.GetRequestStream())
                 {
-                    var responseStream = response.GetResponseStream();
-                    if (responseStream == null)
+                    soapEnvelopeXml.Save(stream);
+                }
+
+                var sw = Stopwatch.StartNew();
+
+                var size = 0;
+
+
+                var status = 0;
+                try
+                {
+                    using (var response = request.GetResponse())
                     {
-                        Console.WriteLine("Error");
-                        return;
-                    }
-                    using (var rd = new StreamReader(responseStream))
-                    {
-                        var soapResult = rd.ReadToEnd();
-                        Console.WriteLine(soapResult);
+                        status = (int)((HttpWebResponse) response).StatusCode;
+                        var responseStream = response.GetResponseStream();
+                        if (responseStream == null)
+                        {
+                            Console.WriteLine("Error");
+                            return;
+                        }
+                        using (var rd = new StreamReader(responseStream))
+                        {
+                            var soapResult = rd.ReadToEnd();
+                            size = soapResult.Length;
+                        }
                     }
                 }
+
+                catch (Exception ex)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine(ex.Message);
+                    Console.ResetColor();
+                }
+                sw.Stop();
+                Console.WriteLine("Request {0}: {1} took {2} milliseconds, size: {3}", i+1, status, sw.ElapsedMilliseconds, size);
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
-            }
-            sw.Stop();
-            Console.WriteLine("Request took {0} milliseconds", sw.ElapsedMilliseconds);
         }
 
         private static HttpWebRequest CreateWebRequest(string url)
